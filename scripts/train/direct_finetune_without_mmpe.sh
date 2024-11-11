@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=mmpe
-#SBATCH --output=/mnt/petrelfs/libozhou/mmpe/output/direct_finetune_base/%j.out
+#SBATCH --output=/mnt/petrelfs/libozhou/mmpe/output/direct_finetune_without_mmpe/%j.out
 #SBATCH --time=60:00:00
 #SBATCH --gres=gpu:8
 #SBATCH --partition=s2_bigdata
-#SBATCH --nodelist=SH-IDC1-10-140-24-60
+
 export OMP_NUM_THREADS=8
 export NCCL_IB_DISABLE=0
 export NCCL_IB_GID_INDEX=3
@@ -41,6 +41,7 @@ ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NN
     --pretrain_mm_mlp_adapter="/mnt/petrelfs/libozhou/caption_len/detail/mm_projector.bin" \
     --mm_tunable_parts="mm_vision_tower,mm_mlp_adapter,mm_language_model" \
     --mm_vision_tower_lr=2e-6 \
+    --use_mmpe False \
     --vision_tower ${VISION_MODEL_VERSION} \
     --mm_projector_type mlp2x_gelu \
     --mm_vision_select_layer -2 \
@@ -51,7 +52,7 @@ ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NN
     --image_grid_pinpoints "[(448, 448), (336, 672), (672, 336), (672, 672), (1008, 336), (336, 1008)]" \
     --mm_patch_merge_type spatial \
     --bf16 True \
-    --output_dir "/mnt/petrelfs/libozhou/mmpe/output/direct_finetune_base" \
+    --output_dir "/mnt/petrelfs/libozhou/mmpe/output/direct_finetune_without_mmpe" \
     --num_train_epochs 1 \
     --per_device_train_batch_size 4 \
     --per_device_eval_batch_size 4 \

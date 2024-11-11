@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=mmpe
-#SBATCH --output=/mnt/petrelfs/libozhou/mmpe/output/direct_finetune_base/%j.out
+#SBATCH --job-name=without_mmpe
+#SBATCH --output=/mnt/petrelfs/libozhou/mmpe/output/pretrain_mmpe/finetune/%j.out
 #SBATCH --time=60:00:00
 #SBATCH --gres=gpu:8
 #SBATCH --partition=s2_bigdata
-#SBATCH --nodelist=SH-IDC1-10-140-24-60
+
 export OMP_NUM_THREADS=8
-export NCCL_IB_DISABLE=0
+export NCCL_IB_DISABLE=1
 export NCCL_IB_GID_INDEX=3
 export NCCL_SOCKET_IFNAME=eth0
 
@@ -19,6 +19,7 @@ LLM_VERSION_CLEAN="${LLM_VERSION//\//_}"
 VISION_MODEL_VERSION="/mnt/hwfile/opendatalab/lbz/CLIP-ViT-L-14-laion2B-s32B-b82K"
 VISION_MODEL_VERSION_CLEAN="${VISION_MODEL_VERSION//\//_}"
 
+#4卡时batchsize=2,gradient_accumulation_steps=4,八卡时batchsize=4,gradient_accumulation_steps=1
 ############### Pretrain ################
 
 PROMPT_VERSION="v1"
@@ -38,9 +39,10 @@ ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NN
     --version ${PROMPT_VERSION} \
     --data_path /mnt/hwfile/opendatalab/lbz/llava-sft/llava_v1_5_mix665k.json \
     --image_folder /mnt/hwfile/opendatalab/lbz/llava-sft \
-    --pretrain_mm_mlp_adapter="/mnt/petrelfs/libozhou/caption_len/detail/mm_projector.bin" \
+    --pretrain_mm_mlp_adapter /mnt/petrelfs/libozhou/mmpe/output/pretrain_mmpe/pretrain/mm_projector.bin \
     --mm_tunable_parts="mm_vision_tower,mm_mlp_adapter,mm_language_model" \
     --mm_vision_tower_lr=2e-6 \
+    --use_mmpe True \
     --vision_tower ${VISION_MODEL_VERSION} \
     --mm_projector_type mlp2x_gelu \
     --mm_vision_select_layer -2 \
@@ -51,7 +53,7 @@ ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NN
     --image_grid_pinpoints "[(448, 448), (336, 672), (672, 336), (672, 672), (1008, 336), (336, 1008)]" \
     --mm_patch_merge_type spatial \
     --bf16 True \
-    --output_dir "/mnt/petrelfs/libozhou/mmpe/output/direct_finetune_base" \
+    --output_dir /mnt/petrelfs/libozhou/mmpe/output/pretrain_mmpe/finetune \
     --num_train_epochs 1 \
     --per_device_train_batch_size 4 \
     --per_device_eval_batch_size 4 \
@@ -74,6 +76,7 @@ ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NN
     --torch_compile True \
     --torch_compile_backend "inductor" \
     --dataloader_drop_last True \
+    --run_name finetune_mmpe \
     --attn_implementation sdpa
 
 # You can delete the sdpa attn_implementation if you want to use flash attn

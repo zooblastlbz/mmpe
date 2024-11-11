@@ -36,6 +36,7 @@ class LlavaMetaModel:
     def __init__(self, config):
         super(LlavaMetaModel, self).__init__(config)
 
+
         if hasattr(config, "mm_vision_tower"):
             delay_load = getattr(config, "delay_load", False)
             self.vision_tower = build_vision_tower(config, delay_load=delay_load)
@@ -57,7 +58,7 @@ class LlavaMetaModel:
         mm_vision_select_feature = model_args.mm_vision_select_feature
         pretrain_mm_mlp_adapter = model_args.pretrain_mm_mlp_adapter
         mm_patch_merge_type = model_args.mm_patch_merge_type
-
+        self.config.use_mmpe=getattr(model_args, "use_mmpe", True)
         self.config.mm_vision_tower = vision_tower
         self.config.vision_tower_pretrained = getattr(model_args, "vision_tower_pretrained", "")
 
@@ -261,7 +262,8 @@ class LlavaMetaForCausalLM(ABC):
 
         if isinstance(modalities, str):
             modalities = [modalities]
-
+        images_type=type(images)
+        len_img=len(images)
         # import pdb; pdb.set_trace()
         if type(images) is list or images.ndim == 5:
             if type(images) is list:
@@ -280,6 +282,7 @@ class LlavaMetaForCausalLM(ABC):
                     images_list.append(image.unsqueeze(0))
 
             concat_images = torch.cat([image for image in images_list], dim=0)
+            image_shape_=concat_images.shape
             split_sizes = [image.shape[0] for image in images_list]
             encoded_image_features = self.encode_images(concat_images)
             # image_features,all_faster_video_features = self.encode_multimodals(concat_images, video_idx_in_batch, split_sizes)
@@ -355,6 +358,7 @@ class LlavaMetaForCausalLM(ABC):
                     elif image_feature.shape[0] > 1:  # multi patches and multi images operations
                         # rank0_print("Single-images")
                         base_image_feature = image_feature[0]
+                        image_feature_shape_0=image_feature.shape
                         image_feature = image_feature[1:]
                         height = width = self.get_vision_tower().num_patches_per_side
                         assert height * width == base_image_feature.shape[0]
@@ -402,12 +406,27 @@ class LlavaMetaForCausalLM(ABC):
                             image_feature = torch.cat((image_feature, self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1).to(image_feature.device)), dim=-1)
                             image_feature = image_feature.flatten(1, 2).transpose(0, 1)
                         else:
+                            image_feature_shape_1=image_feature.shape
                             image_feature = image_feature.permute(0, 2, 1, 3, 4).contiguous()
+                            image_feature_shape_2=image_feature.shape
                             image_feature = image_feature.flatten(0, 3)
+                            image_feature_shape_3=image_feature.shape
                         if "nobase" in mm_patch_merge_type:
                             pass
                         else:
                             image_feature = torch.cat((base_image_feature, image_feature), dim=0)
+                            '''
+                            import pdb
+                            try:
+                                image_feature = torch.cat((base_image_feature, image_feature), dim=0)
+                            except Exception as e:
+                                print(f"image_feature_shape_0: {image_feature_shape_0}")
+                                print(f"image_feature_shape_1: {image_feature_shape_1}")
+                                print(f"image_feature_shape_2: {image_feature_shape_2}")
+                                print(f"image_feature_shape_3: {image_feature_shape_3}")
+
+                                pdb.post_mortem()
+                            '''
                         new_image_features.append(image_feature)
                     else:  # single image operations
                         image_feature = image_feature[0]
@@ -557,18 +576,38 @@ class LlavaMetaForCausalLM(ABC):
             position_ids[:, :split_position] += left_add
             position_ids[:, split_position:] += right_add
 
-        
-        for i, cur_input_ids in enumerate(input_ids):
-            cur_len=seq_len[i]
-            image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
-            for j in range(0,len(image_token_indices)):
-                idx=max_len-cur_len+j*(256*5)
+        '''
+        if getattr(self.config, "use_mmpe", True):
+            for i, cur_input_ids in enumerate(input_ids):
+                cur_len=seq_len[i]
+                image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
+                import pdb; pdb.set_trace()
+                for j in range(0,len(image_token_indices)):
+                    idx=max_len-cur_len+j*(256*5)
+                    begin = position_ids[i, idx].item()
+                    generated_tensor = generate_tensor(begin=begin, length=256)
+                    end_idx = idx + len(generated_tensor)   
+                    position_ids[i, idx:end_idx] = generated_tensor[:end_idx - idx]
+                    if end_idx < position_ids.size(1):
+                        position_ids[i, end_idx:] = torch.arange(begin + 256, begin + 256 + (position_ids.size(1) - end_idx), device=position_ids.device)
+        '''
+        # only consider single image
+
+        if getattr(self.config, "use_mmpe", True):
+            for i, cur_input_ids in enumerate(input_ids):
+                cur_len=seq_len[i]
+                image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
+                if len(image_token_indices)==0:
+                    continue
+                #import pdb; pdb.set_trace()
+                idx=max_len-cur_len+image_token_indices.item()
                 begin = position_ids[i, idx].item()
                 generated_tensor = generate_tensor(begin=begin, length=256)
                 end_idx = idx + len(generated_tensor)   
                 position_ids[i, idx:end_idx] = generated_tensor[:end_idx - idx]
                 if end_idx < position_ids.size(1):
                     position_ids[i, end_idx:] = torch.arange(begin + 256, begin + 256 + (position_ids.size(1) - end_idx), device=position_ids.device)
+        
 
         # import pdb; pdb.set_trace()
         # rank0_print("Finish preparing")

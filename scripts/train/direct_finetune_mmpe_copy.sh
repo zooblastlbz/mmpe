@@ -2,16 +2,16 @@
 #SBATCH --job-name=mmpe
 #SBATCH --output=/mnt/petrelfs/libozhou/mmpe/output/direct_finetune_base/%j.out
 #SBATCH --time=60:00:00
-#SBATCH --gres=gpu:8
+#SBATCH --gres=gpu:4
 #SBATCH --partition=s2_bigdata
-#SBATCH --nodelist=SH-IDC1-10-140-24-60
+
 export OMP_NUM_THREADS=8
 export NCCL_IB_DISABLE=0
 export NCCL_IB_GID_INDEX=3
 export NCCL_SOCKET_IFNAME=eth0
 
 
-NUM_GPUS=8
+NUM_GPUS=4
 NNODES=1
 RANK=0
 LLM_VERSION="/mnt/hwfile/opendatalab/lbz/vicuna-7b-v1.5"
@@ -53,7 +53,7 @@ ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NN
     --bf16 True \
     --output_dir "/mnt/petrelfs/libozhou/mmpe/output/direct_finetune_base" \
     --num_train_epochs 1 \
-    --per_device_train_batch_size 4 \
+    --per_device_train_batch_size 8 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 1 \
     --evaluation_strategy "no" \

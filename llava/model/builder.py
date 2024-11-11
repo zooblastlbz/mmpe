@@ -26,7 +26,7 @@ from llava.utils import rank0_print
 
 def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, load_4bit=False, device_map="auto", torch_dtype="float16",attn_implementation="flash_attention_2", customized_config=None, overwrite_config=None, **kwargs):
     kwargs["device_map"] = device_map
-
+    attn_implementation='sdpa'
     if load_8bit:
         kwargs["load_in_8bit"] = True
     elif load_4bit:
@@ -248,7 +248,8 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                         for k, v in overwrite_config.items():
                             setattr(llava_cfg, k, v)
                     model = LlavaLlamaForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, attn_implementation=attn_implementation, config=llava_cfg, **kwargs)
-                except:
+                except BaseException as e:
+                    print(f"Failed to load model {model_name} from {model_path}. Error: {e}")
                     raise ValueError(f"Model {model_name} not supported")
 
     else:

@@ -135,9 +135,15 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             raise NotImplementedError("`inputs_embeds` is not supported")
 
         if images is not None:
+            #import pdb ; pdb.set_trace()
             (inputs, position_ids, attention_mask, _, inputs_embeds, _) = self.prepare_inputs_labels_for_multimodal(inputs, position_ids, attention_mask, None, None, images, modalities, image_sizes=image_sizes)
         else:
+            #import pdb ; pdb.set_trace()
             inputs_embeds = self.get_model().embed_tokens(inputs)
+        #print(f"inputs: {inputs}")
+        #print(f"position_ids: {position_ids.shape}")
+        #print(f"attention_mask: {attention_mask}")
+        #print(f"inputs_embeds: {inputs_embeds.shape}")
 
         return super().generate(position_ids=position_ids, attention_mask=attention_mask, inputs_embeds=inputs_embeds, **kwargs)
 

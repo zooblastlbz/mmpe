@@ -65,6 +65,7 @@ class ModelArguments:
     )
     # deciding which part of the multimodal model to tune, will overwrite other previous settings
 
+    use_mmpe: Optional[bool] = field(default=True)
     version: Optional[str] = field(default="v0")
     freeze_backbone: bool = field(default=False)
     tune_mm_mlp_adapter: bool = field(default=False)
