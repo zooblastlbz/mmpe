@@ -249,9 +249,17 @@ class LlavaMetaForCausalLM(ABC):
         image_feature = image_feature.permute(1, 2, 0).contiguous()
         return image_feature
 
-    def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities=["image"], image_sizes=None):
+    def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities=["image"], image_sizes=None,best_resolution=None):
         vision_tower = self.get_vision_tower()
+        origin_hight=vision_tower.image_processor.crop_size["height"]
+        origin_width=vision_tower.image_processor.crop_size["width"]
         # rank_print(modalities)
+        def generate_anyres_tensor(begin, hight,width,target_hight,target_width):
+
+            part1 = torch.arange(begin, begin+hight*width)
+            part2=torch.arange(begin,begin+hight*width).reshape(hight, width).repeat_interleave(target_width//width, dim=1).repeat_interleave(target_hight//hight, dim=0).flatten()
+            result = torch.cat((part1, part2))
+            return result
         def generate_tensor(begin=0, length=256):
             part1 = torch.arange(begin, begin+length)
             part2=torch.arange(begin,begin+length).reshape(16, 16).repeat_interleave(2, dim=1).repeat_interleave(2, dim=0).flatten()
@@ -259,7 +267,9 @@ class LlavaMetaForCausalLM(ABC):
             return result
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
             return input_ids, position_ids, attention_mask, past_key_values, None, labels
-
+        
+        best_resolution=[_images['best_resolution'] for _images in images]
+        images=[_images['image'] for _images in images]
         if isinstance(modalities, str):
             modalities = [modalities]
         images_type=type(images)
@@ -406,11 +416,11 @@ class LlavaMetaForCausalLM(ABC):
                             image_feature = torch.cat((image_feature, self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1).to(image_feature.device)), dim=-1)
                             image_feature = image_feature.flatten(1, 2).transpose(0, 1)
                         else:
-                            image_feature_shape_1=image_feature.shape
+                            #image_feature_shape_1=image_feature.shape
                             image_feature = image_feature.permute(0, 2, 1, 3, 4).contiguous()
-                            image_feature_shape_2=image_feature.shape
+                            #image_feature_shape_2=image_feature.shape
                             image_feature = image_feature.flatten(0, 3)
-                            image_feature_shape_3=image_feature.shape
+                            #image_feature_shape_3=image_feature.shape
                         if "nobase" in mm_patch_merge_type:
                             pass
                         else:
@@ -592,8 +602,9 @@ class LlavaMetaForCausalLM(ABC):
                         position_ids[i, end_idx:] = torch.arange(begin + 256, begin + 256 + (position_ids.size(1) - end_idx), device=position_ids.device)
         '''
         # only consider single image
-
-        if getattr(self.config, "use_mmpe", True):
+        '''
+        print(f"self.config.only_448 {self.config.only_448}")
+        if getattr(self.config, "use_mmpe", True) and getattr(self.config, "only_448", True):
             for i, cur_input_ids in enumerate(input_ids):
                 cur_len=seq_len[i]
                 image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
@@ -607,6 +618,21 @@ class LlavaMetaForCausalLM(ABC):
                 position_ids[i, idx:end_idx] = generated_tensor[:end_idx - idx]
                 if end_idx < position_ids.size(1):
                     position_ids[i, end_idx:] = torch.arange(begin + 256, begin + 256 + (position_ids.size(1) - end_idx), device=position_ids.device)
+        '''
+        if getattr(self.config,"use_mmpe",True) and not getattr(self.config,"only_448",False):
+            for i, cur_input_ids in enumerate(input_ids):
+                cur_len=seq_len[i]
+                image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
+                if len(image_token_indices)==0:
+                    continue
+                #import pdb; pdb.set_trace()
+                idx=max_len-cur_len+image_token_indices.item()
+                begin = position_ids[i, idx].item()
+                generated_tensor = generate_anyres_tensor(begin=begin, hight=origin_hight//14, width=origin_width//14,target_hight=best_resolution[i][0]//14,target_width=best_resolution[i][1]//14)
+                end_idx = idx + len(generated_tensor)   
+                position_ids[i, idx:end_idx] = generated_tensor[:end_idx - idx]
+                #if end_idx < position_ids.size(1):
+                #    position_ids[i, end_idx:] = torch.arange(begin + 256, begin + 256 + (position_ids.size(1) - end_idx), device=position_ids.device)
         
 
         # import pdb; pdb.set_trace()

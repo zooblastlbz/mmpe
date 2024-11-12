@@ -98,6 +98,7 @@ class ModelArguments:
     mm_qformer_depth: Optional[int] = field(default=3)
     mm_qformer_latents: Optional[int] = field(default=32)
     mm_qformer_pretrained: Optional[str] = field(default=None)
+    only_448: Optional[bool] = field(default=True) #just for transition
 
     rope_scaling_factor: Optional[float] = field(default=None)
     rope_scaling_type: Optional[str] = field(default=None)
@@ -1064,7 +1065,7 @@ class LazySupervisedDataset(Dataset):
         # print(f"\n\nInspecting the image path, folder = {image_folder}, image={image_file}\n\n")
         try:
             image = Image.open(os.path.join(image_folder, image_file)).convert("RGB")
-            image = image.resize((448, 448), Image.BILINEAR)
+            #image = image.resize((448, 448), Image.BILINEAR)
         except Exception as exn:
             print(f"Failed to open image {image_file}. Exception:", exn)
             raise exn
