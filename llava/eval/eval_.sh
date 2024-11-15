@@ -5,7 +5,7 @@ python3 -m accelerate.commands.launch \
     -m lmms_eval \
     --model llava \
     --model_args pretrained=/mnt/petrelfs/libozhou/mmpe/output/pretrain_mmpe/finetune \
-    --tasks textvqa \
+    --tasks mmbench_en \
     --batch_size 1 \
     --log_samples \
     --verbosity DEBUG \

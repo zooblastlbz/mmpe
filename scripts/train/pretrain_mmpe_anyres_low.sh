@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=without_mmpe
-#SBATCH --output=/mnt/petrelfs/libozhou/mmpe/output/pretrain_without_mmpe_anyres/pretrain/%j.out
+#SBATCH --job-name=mmpe_pretrain
+#SBATCH --output=/mnt/petrelfs/libozhou/mmpe/output/low_mmpe/pretrain/%j.out
 #SBATCH --time=60:00:00
-#SBATCH --gres=gpu:8
+#SBATCH --gres=gpu:4
 #SBATCH --partition=s2_bigdata
 
 export OMP_NUM_THREADS=8
@@ -11,12 +11,12 @@ export NCCL_IB_GID_INDEX=3
 export NCCL_SOCKET_IFNAME=eth0
 
 
-NUM_GPUS=8
+NUM_GPUS=4
 NNODES=1
 RANK=0
 LLM_VERSION="/mnt/hwfile/opendatalab/lbz/vicuna-7b-v1.5"
 LLM_VERSION_CLEAN="${LLM_VERSION//\//_}"
-VISION_MODEL_VERSION="/mnt/hwfile/opendatalab/lbz/clip-vit-large-336"
+VISION_MODEL_VERSION="/mnt/hwfile/opendatalab/lbz/CLIP-ViT-L-14-laion2B-s32B-b82K"
 VISION_MODEL_VERSION_CLEAN="${VISION_MODEL_VERSION//\//_}"
 
 #四卡batch_size=16,accumulate=2,八卡batch_size=16,accumulate=1
@@ -46,18 +46,18 @@ ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NN
     --mm_projector_type mlp2x_gelu \
     --mm_use_im_start_end False \
     --mm_use_im_patch_token False \
-    --use_mmpe False \
+    --use_mmpe True \
     --group_by_modality_length True \
     --image_aspect_ratio anyres \
-    --image_grid_pinpoints "[(336, 672), (672, 336), (672, 672), (1008, 336), (336, 1008),(336,1344),(1344,336)]" \
+    --image_grid_pinpoints "[(224, 448), (448, 224), (448, 448), (672, 224), (224, 672)]" \
     --mm_patch_merge_type spatial \
     --bf16 True \
-    --output_dir /mnt/petrelfs/libozhou/mmpe/output/pretrain_without_mmpe_anyres/pretrain \
+    --output_dir /mnt/petrelfs/libozhou/mmpe/output/low_mmpe/pretrain \
     --num_train_epochs 1 \
     --only_448 False \
     --per_device_train_batch_size  16 \
     --per_device_eval_batch_size 4 \
-    --gradient_accumulation_steps 1 \
+    --gradient_accumulation_steps 2 \
     --evaluation_strategy "no" \
     --save_strategy "no" \
     --save_steps 50000 \
@@ -72,7 +72,7 @@ ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NN
     --dataloader_num_workers 16 \
     --lazy_preprocess True \
     --report_to wandb \
-    --run_name pretrain_without_mmpe_anyres \
+    --run_name pretrain_mmpe_anyres_low \
     --attn_implementation sdpa
 
 # You can delete the sdpa attn_implementation if you want to use flash attn

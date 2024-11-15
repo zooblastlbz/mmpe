@@ -61,6 +61,7 @@ class LlavaMetaModel:
         self.config.use_mmpe=getattr(model_args, "use_mmpe", True)
         self.config.mm_vision_tower = vision_tower
         self.config.vision_tower_pretrained = getattr(model_args, "vision_tower_pretrained", "")
+        self.config.only_448=getattr(model_args, "only_448", False)
 
         if self.get_vision_tower() is None:
             vision_tower = build_vision_tower(model_args)
@@ -159,6 +160,30 @@ def unpad_image(tensor, original_size):
 
     return unpadded_tensor
 
+import torch.nn.functional as F
+def interpolate_tensor(tensor, target_height, target_width, mode='nearest'):
+    """
+    Interpolates a tensor of shape (a, b) to shape (c, d) using nearest neighbor interpolation.
+
+    Args:
+    tensor (torch.Tensor): The input tensor of shape (a, b).
+    target_height (int): The target height (c).
+    target_width (int): The target width (d).
+    mode (str): The interpolation mode. Default is 'nearest'.
+
+    Returns:
+    torch.Tensor: The interpolated tensor of shape (c, d).
+    """
+    # Add batch and channel dimensions
+    tensor = tensor.unsqueeze(0).unsqueeze(0)
+    
+    # Interpolate the tensor
+    interpolated_tensor = F.interpolate(tensor, size=(target_height, target_width), mode=mode)
+    
+    # Remove batch and channel dimensions
+    interpolated_tensor = interpolated_tensor.squeeze(0).squeeze(0)
+    
+    return interpolated_tensor
 
 class LlavaMetaForCausalLM(ABC):
 
@@ -249,10 +274,9 @@ class LlavaMetaForCausalLM(ABC):
         image_feature = image_feature.permute(1, 2, 0).contiguous()
         return image_feature
 
-    def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities=["image"], image_sizes=None,best_resolution=None):
+    def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities=["image"], image_sizes=None):
         vision_tower = self.get_vision_tower()
-        origin_hight=vision_tower.image_processor.crop_size["height"]
-        origin_width=vision_tower.image_processor.crop_size["width"]
+        
         # rank_print(modalities)
         def generate_anyres_tensor(begin, hight,width,target_hight,target_width):
 
@@ -268,8 +292,8 @@ class LlavaMetaForCausalLM(ABC):
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
             return input_ids, position_ids, attention_mask, past_key_values, None, labels
         
-        best_resolution=[_images['best_resolution'] for _images in images]
-        images=[_images['image'] for _images in images]
+
+
         if isinstance(modalities, str):
             modalities = [modalities]
         images_type=type(images)
@@ -318,6 +342,7 @@ class LlavaMetaForCausalLM(ABC):
 
             elif mm_patch_merge_type.startswith("spatial"):
                 new_image_features = []
+                feature_size=[]
                 for image_idx, image_feature in enumerate(image_features):
                     # FIXME: now assume the image is square, and split to 2x2 patches
                     # num_patches = h * w, where h = w = sqrt(num_patches)
@@ -414,6 +439,7 @@ class LlavaMetaForCausalLM(ABC):
                             image_feature = image_feature.flatten(1, 2).flatten(2, 3)
                             image_feature = unpad_image(image_feature, image_sizes[image_idx])
                             image_feature = torch.cat((image_feature, self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1).to(image_feature.device)), dim=-1)
+                            feature_size.append((image_feature.shape[1],image_feature.shape[2]))
                             image_feature = image_feature.flatten(1, 2).transpose(0, 1)
                         else:
                             #image_feature_shape_1=image_feature.shape
@@ -602,9 +628,27 @@ class LlavaMetaForCausalLM(ABC):
                         position_ids[i, end_idx:] = torch.arange(begin + 256, begin + 256 + (position_ids.size(1) - end_idx), device=position_ids.device)
         '''
         # only consider single image
-        '''
-        print(f"self.config.only_448 {self.config.only_448}")
-        if getattr(self.config, "use_mmpe", True) and getattr(self.config, "only_448", True):
+
+        if getattr(self.config, "use_mmpe", True) and "unpad" in mm_patch_merge_type:
+            for i, cur_input_ids in enumerate(input_ids):
+                cur_len=seq_len[i]
+                image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
+                if len(image_token_indices)==0:
+                    continue
+                idx=max_len-cur_len+image_token_indices.item()
+                begin = position_ids[i, idx].item()
+                tensor= torch.arange(begin,begin+576,device=position_ids.device).float().reshape(24,24)
+                target_height, target_width = feature_size[i]
+                tensor_2=interpolate_tensor(tensor, target_height, target_width, mode='nearest')
+                if target_height<target_width-1:
+                    tensor_2[1:-1,:]=interpolate_tensor(tensor[1:-1,:], target_height-2, target_width, mode='nearest')
+                elif target_height>target_width-1:
+                    tensor_2[:,1:-1]=interpolate_tensor(tensor[:,1:-1], target_height, target_width-2, mode='nearest')
+                position_ids[i, idx:idx+576] = tensor.flatten().int()
+                position_ids[i, idx+576:idx+576+target_height*target_width] = tensor_2.flatten().int()
+                position_ids[i, idx+576+target_height*target_width:] = torch.arange(begin+576,begin+576+(position_ids.size(1)-idx-576-target_height*target_width),device=position_ids.device)
+                
+        elif getattr(self.config, "use_mmpe", True) and getattr(self.config, "only_448", True):
             for i, cur_input_ids in enumerate(input_ids):
                 cur_len=seq_len[i]
                 image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
@@ -618,8 +662,9 @@ class LlavaMetaForCausalLM(ABC):
                 position_ids[i, idx:end_idx] = generated_tensor[:end_idx - idx]
                 if end_idx < position_ids.size(1):
                     position_ids[i, end_idx:] = torch.arange(begin + 256, begin + 256 + (position_ids.size(1) - end_idx), device=position_ids.device)
-        '''
-        if getattr(self.config,"use_mmpe",True) and not getattr(self.config,"only_448",False):
+
+       
+        elif getattr(self.config,"use_mmpe",True) and not getattr(self.config,"only_448",True):
             for i, cur_input_ids in enumerate(input_ids):
                 cur_len=seq_len[i]
                 image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
@@ -631,8 +676,8 @@ class LlavaMetaForCausalLM(ABC):
                 generated_tensor = generate_anyres_tensor(begin=begin, hight=origin_hight//14, width=origin_width//14,target_hight=best_resolution[i][0]//14,target_width=best_resolution[i][1]//14)
                 end_idx = idx + len(generated_tensor)   
                 position_ids[i, idx:end_idx] = generated_tensor[:end_idx - idx]
-                #if end_idx < position_ids.size(1):
-                #    position_ids[i, end_idx:] = torch.arange(begin + 256, begin + 256 + (position_ids.size(1) - end_idx), device=position_ids.device)
+                if end_idx < position_ids.size(1):
+                    position_ids[i, end_idx:] = torch.arange(end_idx ,position_ids.size(1), device=position_ids.device)
         
 
         # import pdb; pdb.set_trace()

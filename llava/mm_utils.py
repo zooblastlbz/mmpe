@@ -160,6 +160,8 @@ def resize_and_pad_image(image, target_resolution):
     Returns:
         PIL.Image.Image: The resized and padded image.
     """
+    new_image=image.resize(target_resolution)
+    '''
     original_width, original_height = image.size
     target_width, target_height = target_resolution
 
@@ -184,7 +186,7 @@ def resize_and_pad_image(image, target_resolution):
     paste_x = (target_width - new_width) // 2
     paste_y = (target_height - new_height) // 2
     new_image.paste(resized_image, (paste_x, paste_y))
-
+    '''
     return new_image
 
 
@@ -290,7 +292,7 @@ def process_anyres_image(image, processor, grid_pinpoints):
 
     image_patches = [image_original_resize] + patches
     image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
-    return {'image':torch.stack(image_patches, dim=0), 'best_resolution':best_resolution}
+    return torch.stack(image_patches, dim=0)
 
 
 def load_image_from_base64(image):
@@ -314,7 +316,6 @@ def expand2square(pil_img, background_color):
 def process_images(images, image_processor, model_cfg):
     image_aspect_ratio = getattr(model_cfg, "image_aspect_ratio", None)
     new_images = []
-    best_resolution = None
     if image_aspect_ratio == "highres":
         for image in images:
             image = process_highres_image(image, image_processor, model_cfg.image_grid_pinpoints)
@@ -334,8 +335,8 @@ def process_images(images, image_processor, model_cfg):
             new_images.append(image)
     else:
         return image_processor.preprocess(images, return_tensors="pt")["pixel_values"]
-    #if all(x.shape == new_images[0].shape for x in new_images):
-    #    new_images = torch.stack(new_images, dim=0)
+    if all(x.shape == new_images[0].shape for x in new_images):
+        new_images = torch.stack(new_images, dim=0)
     return new_images
 
 
