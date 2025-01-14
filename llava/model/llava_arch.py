@@ -275,7 +275,10 @@ class LlavaMetaForCausalLM(ABC):
         return image_feature
 
     def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities=["image"], image_sizes=None):
+        #print("prepare inputs labels for multimodal ",flush=True)
         vision_tower = self.get_vision_tower()
+        num_pathes=self.get_vision_tower()
+        num_patch_per_side=self.get_vision_tower().num_patches_per_side
         
         # rank_print(modalities)
         def generate_anyres_tensor(begin, hight,width,target_hight,target_width):
@@ -441,6 +444,7 @@ class LlavaMetaForCausalLM(ABC):
                             image_feature = torch.cat((image_feature, self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1).to(image_feature.device)), dim=-1)
                             feature_size.append((image_feature.shape[1],image_feature.shape[2]))
                             image_feature = image_feature.flatten(1, 2).transpose(0, 1)
+                            
                         else:
                             #image_feature_shape_1=image_feature.shape
                             image_feature = image_feature.permute(0, 2, 1, 3, 4).contiguous()
@@ -630,54 +634,47 @@ class LlavaMetaForCausalLM(ABC):
         # only consider single image
 
         if getattr(self.config, "use_mmpe", True) and "unpad" in mm_patch_merge_type:
-            for i, cur_input_ids in enumerate(input_ids):
-                cur_len=seq_len[i]
-                image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
-                if len(image_token_indices)==0:
-                    continue
-                idx=max_len-cur_len+image_token_indices.item()
-                begin = position_ids[i, idx].item()
-                tensor= torch.arange(begin,begin+576,device=position_ids.device).float().reshape(24,24)
-                target_height, target_width = feature_size[i]
-                tensor_2=interpolate_tensor(tensor, target_height, target_width, mode='nearest')
-                if target_height<target_width-1:
-                    tensor_2[1:-1,:]=interpolate_tensor(tensor[1:-1,:], target_height-2, target_width, mode='nearest')
-                elif target_height>target_width-1:
-                    tensor_2[:,1:-1]=interpolate_tensor(tensor[:,1:-1], target_height, target_width-2, mode='nearest')
-                position_ids[i, idx:idx+576] = tensor.flatten().int()
-                position_ids[i, idx+576:idx+576+target_height*target_width] = tensor_2.flatten().int()
-                position_ids[i, idx+576+target_height*target_width:] = torch.arange(begin+576,begin+576+(position_ids.size(1)-idx-576-target_height*target_width),device=position_ids.device)
-                
-        elif getattr(self.config, "use_mmpe", True) and getattr(self.config, "only_448", True):
-            for i, cur_input_ids in enumerate(input_ids):
-                cur_len=seq_len[i]
-                image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
-                if len(image_token_indices)==0:
-                    continue
-                #import pdb; pdb.set_trace()
-                idx=max_len-cur_len+image_token_indices.item()
-                begin = position_ids[i, idx].item()
-                generated_tensor = generate_tensor(begin=begin, length=256)
-                end_idx = idx + len(generated_tensor)   
-                position_ids[i, idx:end_idx] = generated_tensor[:end_idx - idx]
-                if end_idx < position_ids.size(1):
-                    position_ids[i, end_idx:] = torch.arange(begin + 256, begin + 256 + (position_ids.size(1) - end_idx), device=position_ids.device)
+            
+            if getattr(self.config, "tokenizer_padding_side", "right") == "left":
+                for i, cur_input_ids in enumerate(input_ids):
+                    cur_len=seq_len[i]
+                    image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
+                    if len(image_token_indices)==0:
+                        continue
+                    idx=max_len-cur_len+image_token_indices.item()
+                    begin = position_ids[i, idx].item()
+                    tensor= torch.arange(begin,begin+num_pathes,device=position_ids.device).float().reshape(num_patch_per_side,num_patch_per_side)
+                    target_height, target_width = feature_size[i]
+                    tensor_2=interpolate_tensor(tensor, target_height, target_width, mode='nearest')
+                    #tensor_2 = torch.round(tensor_2)
+                    if target_height<target_width-1 and target_height-2>0:
+                        tensor_2[1:-1,:]=interpolate_tensor(tensor[1:-1,:], target_height-2, target_width, mode='nearest')
+                    elif target_height>target_width-1 and target_width-2>0:
+                        tensor_2[:,1:-1]=interpolate_tensor(tensor[:,1:-1], target_height, target_width-2, mode='nearest')
+                    position_ids[i, idx:idx+num_pathes] = tensor.flatten().int()
+                    position_ids[i, idx+num_pathes:idx+num_pathes+target_height*target_width] = tensor_2.flatten().int()
+                    position_ids[i, idx+num_pathes+target_height*target_width:] = torch.arange(begin+num_pathes,begin+num_pathes+(position_ids.size(1)-idx-num_pathes-target_height*target_width),device=position_ids.device)
+                for i, cur_input_ids in enumerate(input_ids):
+                    cur_len=seq_len[i]
+                    image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
+                    if len(image_token_indices)==0:
+                        continue
+                    idx=image_token_indices.item()
+                    begin=position_ids[i, idx].item()
+                    tensor= torch.arange(begin,begin+num_pathes,device=position_ids.device).float().reshape(num_patch_per_side,num_patch_per_side)
+                    target_height, target_width = feature_size[i]
+                    tensor_2=interpolate_tensor(tensor, target_height, target_width, mode='nearest')
+                    #tensor_2 = torch.round(tensor_2)
+                    if target_height<target_width-1 and target_height-2>0:
+                        tensor_2[1:-1,:]=interpolate_tensor(tensor[1:-1,:], target_height-2, target_width, mode='nearest')
+                    elif target_height>target_width-1 and target_width-2>0:
+                        tensor_2[:,1:-1]=interpolate_tensor(tensor[:,1:-1], target_height, target_width-2, mode='nearest')
+                    position_ids[i, idx:idx+num_pathes] = tensor.flatten().int()
+                    position_ids[i, idx+num_pathes:idx+num_pathes+target_height*target_width] = tensor_2.flatten().int()
+                    position_ids[i, idx+num_pathes+target_height*target_width:] = torch.arange(begin+num_pathes,begin+num_pathes+(position_ids.size(1)-idx-num_pathes-target_height*target_width),device=position_ids.device)
 
-       
-        elif getattr(self.config,"use_mmpe",True) and not getattr(self.config,"only_448",True):
-            for i, cur_input_ids in enumerate(input_ids):
-                cur_len=seq_len[i]
-                image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
-                if len(image_token_indices)==0:
-                    continue
-                #import pdb; pdb.set_trace()
-                idx=max_len-cur_len+image_token_indices.item()
-                begin = position_ids[i, idx].item()
-                generated_tensor = generate_anyres_tensor(begin=begin, hight=origin_hight//14, width=origin_width//14,target_hight=best_resolution[i][0]//14,target_width=best_resolution[i][1]//14)
-                end_idx = idx + len(generated_tensor)   
-                position_ids[i, idx:end_idx] = generated_tensor[:end_idx - idx]
-                if end_idx < position_ids.size(1):
-                    position_ids[i, end_idx:] = torch.arange(end_idx ,position_ids.size(1), device=position_ids.device)
+        
+
         
 
         # import pdb; pdb.set_trace()
